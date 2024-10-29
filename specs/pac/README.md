@@ -11,7 +11,7 @@ Pipelines as code is a project allowing you to define your CI/CD using Tekton Pi
 - Click on your profile under `preferences` Under `User Settings --> Access tokens`
 - Create a New Personal Access Token and `export GITLAB_TOKEN=<Token>`
 - Create a new Public Group in Gitlab and Copy the only the Group name from URL e.g: From GitLab URL `https://gitlab.com/groups/test324345` Copy only the group name `test324345` and `export GITLAB_GROUP_NAMESPACE=<GroupName>`
-- Enter any WebhookSecret to be used for gitlab webhook `export WEBHOOK_TOKEN=<WebhookSecret>`
+- Enter any WebhookSecret to be used for gitlab webhook `export GITLAB_WEBHOOK_TOKEN=<GitLabWebHookSecret>`
 
 ## Running PAC E2E tests
 Export the following Env Variables
@@ -19,7 +19,7 @@ Export the following Env Variables
 export GITLAB_TOKEN=<Token>
 export GITLAB_PROJECT_ID=<ProjectID>
 export GITLAB_GROUP_NAMESPACE=<GroupName>
-export WEBHOOK_TOKEN=<WebhookSecret>
+export GITLAB_WEBHOOK_TOKEN=<GitLabWebHookSecret>
 ```
 
 To run pac e2e tests...
