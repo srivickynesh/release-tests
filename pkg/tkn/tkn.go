@@ -15,16 +15,16 @@ import (
 	"gotest.tools/v3/icmd"
 )
 
-type Cmd struct {
-	// path to tkn binary
-	Path string
-}
-
 var (
 	tknPath    string
 	tknPacPath string
 	opcPath    string
 )
+
+type Cmd struct {
+	// path to tkn binary
+	Path string
+}
 
 // New initializes Cmd
 func New(tknPath string) Cmd {
@@ -33,7 +33,13 @@ func New(tknPath string) Cmd {
 	}
 }
 
-func findBinaryPath(binary string) string {
+func init() {
+	tknPath = findBinaryPath("tkn")
+	opcPath = findBinaryPath("opc")
+	tknPacPath = findBinaryPath("tkn-pac")
+}
+
+func FindBinaryPath(binary string) string {
 	paths := []string{"/usr/bin", "/usr/local/bin"}
 	for _, dir := range paths {
 		fullPath := fmt.Sprintf("%s/%s", dir, binary)
@@ -43,37 +49,9 @@ func findBinaryPath(binary string) string {
 			}
 		}
 	}
-	return ""
-}
 
-func SetupCLIPaths() {
-	if foundPath := findBinaryPath("tkn"); foundPath != "" {
-		tknPath = foundPath
-
-		baseDir := tknPath[:strings.LastIndex(tknPath, "/")]
-		tknPacCandidate := fmt.Sprintf("%s/tkn-pac", baseDir)
-		opcCandidate := fmt.Sprintf("%s/opc", baseDir)
-
-		if info, err := os.Stat(tknPacCandidate); err == nil && !info.IsDir() && info.Mode()&0111 != 0 {
-			tknPacPath = tknPacCandidate
-		} else {
-			tknPacPath = tknPath
-		}
-		if info, err := os.Stat(opcCandidate); err == nil && !info.IsDir() && info.Mode()&0111 != 0 {
-			opcPath = opcCandidate
-		} else {
-			opcPath = tknPath
-		}
-	} else {
-		DownloadCLIFromCluster()
-		tknPath = "/tmp/tkn"
-		tknPacPath = "/tmp/tkn-pac"
-		opcPath = "/tmp/opc"
-	}
-
-	fmt.Printf("Using tkn path: %s\n", tknPath)
-	fmt.Printf("Using tkn-pac path: %s\n", tknPacPath)
-	fmt.Printf("Using opc path: %s\n", opcPath)
+	DownloadCLIFromCluster()
+	return fmt.Sprintf("/tmp/%s", binary)
 }
 
 // Verify the versions of Openshift Pipelines components
@@ -81,7 +59,7 @@ func AssertComponentVersion(version string, component string) {
 	var actualVersion string
 	switch component {
 	case "pipeline", "triggers", "operator", "chains":
-		actualVersion = cmd.MustSucceed("tkn", "version", "--component", component).Stdout()
+		actualVersion = cmd.MustSucceed(tknPath, "version", "--component", component).Stdout()
 	case "OSP":
 		actualVersion = cmd.MustSucceed("oc", "get", "tektonconfig", "config", "-o", "jsonpath={.status.version}").Stdout()
 	case "pac":
@@ -223,7 +201,7 @@ func (w *CapturingPassThroughWriter) Bytes() []byte {
 
 func StartPipeline(pipelineName string, params map[string]string, workspaces map[string]string, namespace string, args ...string) string {
 	var commandArgs []string
-	commandArgs = append(commandArgs, "tkn", "pipeline", "start", pipelineName, "-o", "name", "-n", namespace)
+	commandArgs = append(commandArgs, tknPath, "pipeline", "start", pipelineName, "-o", "name", "-n", namespace)
 	for key, value := range params {
 		commandArgs = append(commandArgs, fmt.Sprintf("-p %s=%s", key, value))
 	}

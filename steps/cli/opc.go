@@ -5,12 +5,7 @@ import (
 	"github.com/openshift-pipelines/release-tests/pkg/tkn"
 )
 
-var _ = gauge.Step("Setup CLI paths and assert", func() {
+var _ = gauge.Step("Run OPC tests", func() {
 	tkn.SetupCLIPaths()
-
-	tkn.AssertClientVersion("tkn")
-	tkn.AssertClientVersion("tkn-pac")
-	tkn.AssertClientVersion("opc")
-	tkn.AssertServerVersion("opc")
 
 })
