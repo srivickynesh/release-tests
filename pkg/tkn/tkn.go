@@ -15,6 +15,12 @@ import (
 	"gotest.tools/v3/icmd"
 )
 
+var (
+	tknPath    string
+	tknPacPath string
+	opcPath    string
+)
+
 type Cmd struct {
 	// path to tkn binary
 	Path string
@@ -27,12 +33,33 @@ func New(tknPath string) Cmd {
 	}
 }
 
+func init() {
+	tknPath = findBinaryPath("tkn")
+	opcPath = findBinaryPath("opc")
+	tknPacPath = findBinaryPath("tkn-pac")
+}
+
+func FindBinaryPath(binary string) string {
+	paths := []string{"/usr/bin", "/usr/local/bin"}
+	for _, dir := range paths {
+		fullPath := fmt.Sprintf("%s/%s", dir, binary)
+		if info, err := os.Stat(fullPath); err == nil {
+			if !info.IsDir() && info.Mode()&0111 != 0 {
+				return fullPath
+			}
+		}
+	}
+
+	DownloadCLIFromCluster()
+	return fmt.Sprintf("/tmp/%s", binary)
+}
+
 // Verify the versions of Openshift Pipelines components
 func AssertComponentVersion(version string, component string) {
 	var actualVersion string
 	switch component {
 	case "pipeline", "triggers", "operator", "chains":
-		actualVersion = cmd.MustSucceed("tkn", "version", "--component", component).Stdout()
+		actualVersion = cmd.MustSucceed(tknPath, "version", "--component", component).Stdout()
 	case "OSP":
 		actualVersion = cmd.MustSucceed("oc", "get", "tektonconfig", "config", "-o", "jsonpath={.status.version}").Stdout()
 	case "pac":
@@ -68,7 +95,7 @@ func AssertClientVersion(binary string) {
 
 	switch binary {
 	case "tkn-pac":
-		commandResult = cmd.MustSucceed("/tmp/tkn-pac", "version").Stdout()
+		commandResult = cmd.MustSucceed(tknPacPath, "version").Stdout()
 		expectedVersion := os.Getenv("PAC_VERSION")
 		if !strings.Contains(commandResult, expectedVersion) {
 			testsuit.T.Errorf("tkn-pac has an unexpected version: %s. Expected: %s", commandResult, expectedVersion)
@@ -76,19 +103,19 @@ func AssertClientVersion(binary string) {
 
 	case "tkn":
 		expectedVersion := os.Getenv("TKN_CLIENT_VERSION")
-		commandResult = cmd.MustSucceed("/tmp/tkn", "version").Stdout()
-		var splittedCommandResult = strings.Split(commandResult, "\n")
-		for i := range splittedCommandResult {
-			if strings.Contains(splittedCommandResult[i], "Client") {
-				if !strings.Contains(splittedCommandResult[i], expectedVersion) {
-					unexpectedVersion = splittedCommandResult[i]
+		commandResult = cmd.MustSucceed(tknPath, "version").Stdout()
+		splittedCommandResult := strings.Split(commandResult, "\n")
+		for _, line := range splittedCommandResult {
+			if strings.Contains(line, "Client") {
+				if !strings.Contains(line, expectedVersion) {
+					unexpectedVersion = line
 					testsuit.T.Errorf("tkn client has an unexpected version: %s. Expected: %s", unexpectedVersion, expectedVersion)
 				}
 			}
 		}
 
 	case "opc":
-		commandResult = cmd.MustSucceed("/tmp/opc", "version").Stdout()
+		commandResult = cmd.MustSucceed(opcPath, "version").Stdout()
 		components := [3]string{"OpenShift Pipelines Client", "Tekton CLI", "Pipelines as Code CLI"}
 		expectedVersions := [3]string{os.Getenv("OSP_VERSION"), os.Getenv("TKN_CLIENT_VERSION"), os.Getenv("PAC_VERSION")}
 		splittedCommandResult := strings.Split(commandResult, "\n")
@@ -111,7 +138,7 @@ func AssertServerVersion(binary string) {
 
 	switch binary {
 	case "opc":
-		commandResult = cmd.MustSucceed("/tmp/opc", "version", "--server").Stdout()
+		commandResult = cmd.MustSucceed(opcPath, "version", "--server").Stdout()
 		components := [4]string{"Chains version", "Pipeline version", "Triggers version", "Operator version"}
 		expectedVersions := [4]string{os.Getenv("CHAINS_VERSION"), os.Getenv("PIPELINE_VERSION"), os.Getenv("TRIGGERS_VERSION"), os.Getenv("OPERATOR_VERSION")}
 		splittedCommandResult := strings.Split(commandResult, "\n")
@@ -126,7 +153,6 @@ func AssertServerVersion(binary string) {
 	default:
 		testsuit.T.Errorf("Unknown binary or client")
 	}
-
 }
 
 func ValidateQuickstarts() {
@@ -175,7 +201,7 @@ func (w *CapturingPassThroughWriter) Bytes() []byte {
 
 func StartPipeline(pipelineName string, params map[string]string, workspaces map[string]string, namespace string, args ...string) string {
 	var commandArgs []string
-	commandArgs = append(commandArgs, "tkn", "pipeline", "start", pipelineName, "-o", "name", "-n", namespace)
+	commandArgs = append(commandArgs, tknPath, "pipeline", "start", pipelineName, "-o", "name", "-n", namespace)
 	for key, value := range params {
 		commandArgs = append(commandArgs, fmt.Sprintf("-p %s=%s", key, value))
 	}
