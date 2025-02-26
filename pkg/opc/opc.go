@@ -6,13 +6,7 @@ import (
 	"strings"
 
 	"github.com/openshift-pipelines/release-tests/pkg/cmd"
-	"github.com/openshift-pipelines/release-tests/pkg/tkn"
 )
-
-var opcPath = func() string {
-	path := tkn.FindBinaryPath("opc")
-	return path
-}()
 
 type PacInfoInstall struct {
 	PipelinesAsCode   PipelinesAsCodeSection
@@ -45,8 +39,15 @@ type Repository struct {
 	URL       string
 }
 
+type PipelineRunList struct {
+	Name     string
+	Started  string
+	Duration string
+	Status   string
+}
+
 func GetOpcPacInfoInstall() (*PacInfoInstall, error) {
-	result := cmd.MustSucceed(opcPath, "pac", "info", "install")
+	result := cmd.MustSucceed("opc", "pac", "info", "install")
 	output := result.Stdout()
 	lines := strings.Split(output, "\n")
 
@@ -145,6 +146,50 @@ func GetOpcPacInfoInstall() (*PacInfoInstall, error) {
 	}
 
 	return &pacInfo, nil
+}
+
+func GetOpcPrList() ([]PipelineRunList, error) {
+	result := cmd.MustSucceed("opc", "pr", "ls")
+	output := strings.TrimSpace(result.Stdout())
+	lines := strings.Split(output, "\n")
+	if len(lines) < 2 {
+		return nil, fmt.Errorf("unexpected output: %s", output)
+	}
+
+	var runs []PipelineRunList
+	for _, line := range lines[1:] {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 4 {
+			return nil, fmt.Errorf("unexpected row format: %s", line)
+		}
+
+		nameFieldCount := len(fields) - 3
+		run := PipelineRunList{
+			Name:     strings.Join(fields[:nameFieldCount], " "),
+			Started:  fields[nameFieldCount],
+			Duration: fields[nameFieldCount+1],
+			Status:   fields[nameFieldCount+2],
+		}
+		runs = append(runs, run)
+	}
+	return runs, nil
+}
+
+func GetOpcPr(pipelineRunName string) (*PipelineRun, error) {
+	runs, err := GetOpcPrList()
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range runs {
+		if run.Name == pipelineRunName {
+			return &run, nil
+		}
+	}
+	return nil, fmt.Errorf("pipeline run %q not found", pipelineRunName)
 }
 
 // func GetOpcClusterTriggerBinding() ([]string, error) {
@@ -352,56 +397,5 @@ func GetOpcPacInfoInstall() (*PacInfoInstall, error) {
 // }
 
 // -----------------------------------------------------------
-
-// type PipelineRunList struct {
-// 	Name           string
-// 	Started        string
-// 	Duration       string
-// 	Status 		   string
-// }
-
-// func GetOpcPrList() ([]PipelineRunList, error) {
-// 	result := cmd.MustSucceed(opcPath, "pr", "ls")
-// 	output := strings.TrimSpace(result.Stdout())
-// 	lines := strings.Split(output, "\n")
-// 	if len(lines) < 2 {
-// 		return nil, fmt.Errorf("unexpected output: %s", output)
-// 	}
-
-// 	var runs []PipelineRunList
-// 	for _, line := range lines[1:] {
-// 		line = strings.TrimSpace(line)
-// 		if line == "" {
-// 			continue
-// 		}
-// 		fields := strings.Fields(line)
-// 		if len(fields) < 4 {
-// 			return nil, fmt.Errorf("unexpected row format: %s", line)
-// 		}
-
-// 		nameFieldCount := len(fields) - 3
-// 		run := PipelineRunList{
-// 			Name:           strings.Join(fields[:nameFieldCount], " "),
-// 			Started:        fields[nameFieldCount],
-// 			Duration:       fields[nameFieldCount+1],
-// 			Status: fields[nameFieldCount+2],
-// 		}
-// 		runs = append(runs, run)
-// 	}
-// 	return runs, nil
-// }
-
-// func GetOpcPr(pipelineRunName string) (*PipelineRun, error) {
-// 	runs, err := GetOpcPrList()
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	for _, run := range runs {
-// 		if run.Name == pipelineRunName {
-// 			return &run, nil
-// 		}
-// 	}
-// 	return nil, fmt.Errorf("pipeline run %q not found", pipelineRunName)
-// }
 
 // ----------------------------------------

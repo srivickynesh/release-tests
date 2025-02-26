@@ -33,33 +33,12 @@ func New(tknPath string) Cmd {
 	}
 }
 
-func init() {
-	tknPath = findBinaryPath("tkn")
-	opcPath = findBinaryPath("opc")
-	tknPacPath = findBinaryPath("tkn-pac")
-}
-
-func FindBinaryPath(binary string) string {
-	paths := []string{"/usr/bin", "/usr/local/bin"}
-	for _, dir := range paths {
-		fullPath := fmt.Sprintf("%s/%s", dir, binary)
-		if info, err := os.Stat(fullPath); err == nil {
-			if !info.IsDir() && info.Mode()&0111 != 0 {
-				return fullPath
-			}
-		}
-	}
-
-	DownloadCLIFromCluster()
-	return fmt.Sprintf("/tmp/%s", binary)
-}
-
 // Verify the versions of Openshift Pipelines components
 func AssertComponentVersion(version string, component string) {
 	var actualVersion string
 	switch component {
 	case "pipeline", "triggers", "operator", "chains":
-		actualVersion = cmd.MustSucceed(tknPath, "version", "--component", component).Stdout()
+		actualVersion = cmd.MustSucceed("opc", "version", "--component", component).Stdout()
 	case "OSP":
 		actualVersion = cmd.MustSucceed("oc", "get", "tektonconfig", "config", "-o", "jsonpath={.status.version}").Stdout()
 	case "pac":
