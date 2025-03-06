@@ -22,5 +22,5 @@ var _ = gauge.Step("Configure GitLab repo and validate pipelinerun", func() {
 	project := pac.SetupGitLabProject(client)
 	pipelineName := pac.ConfigurePreviewChanges(client, project.ID)
 	pipelines.ValidatePipelineRun(store.Clients(), pipelineName, "successful", "no", store.Namespace())
-	pac.CleanupPAC(client, store.Clients(), project.ID, store.GetScenarioData("smee_deployment_name"), store.Namespace())
+	// pac.CleanupPAC(client, store.Clients(), project.ID, store.GetScenarioData("smee_deployment_name"), store.Namespace())
 })

@@ -19,7 +19,6 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/git"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/release-tests/pkg/clients"
-	"github.com/openshift-pipelines/release-tests/pkg/k8s"
 	"github.com/openshift-pipelines/release-tests/pkg/oc"
 	"github.com/openshift-pipelines/release-tests/pkg/pipelines"
 	"github.com/openshift-pipelines/release-tests/pkg/store"
@@ -243,6 +242,36 @@ func createNewRepository(c *clients.Clients, projectName, targetGroupNamespace, 
 	return nil
 }
 
+// addLabelToProject adds a label to a GitLab project
+func addLabelToProject(client *gitlab.Client, projectID int, labelName, color, description string) error {
+	// Check if the label already exists
+	labels, _, err := client.Labels.ListLabels(projectID, &gitlab.ListLabelsOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to fetch project labels: %w", err)
+	}
+
+	for _, label := range labels {
+		if label.Name == labelName {
+			fmt.Printf("Label '%s' already exists in project ID %d\n", labelName, projectID)
+			return nil
+		}
+	}
+
+	// Create label if it doesn't exist
+	_, _, err = client.Labels.CreateLabel(projectID, &gitlab.CreateLabelOptions{
+		Name:        gitlab.Ptr(labelName),
+		Color:       gitlab.Ptr(color),
+		Description: gitlab.Ptr(description),
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to create label '%s': %w", labelName, err)
+	}
+
+	fmt.Printf("Successfully added label '%s' to project ID %d\n", labelName, projectID)
+	return nil
+}
+
 func SetupGitLabProject(client *gitlab.Client) *gitlab.Project {
 	gitlabGroupNamespace := os.Getenv("GITLAB_GROUP_NAMESPACE")
 	projectIDOrPath := os.Getenv("GITLAB_PROJECT_ID")
@@ -269,8 +298,29 @@ func SetupGitLabProject(client *gitlab.Client) *gitlab.Project {
 		testsuit.T.Fail(fmt.Errorf("failed to create repository"))
 	}
 
+	// Add a "bug" label to the project
+	err = addLabelToProject(client, project.ID, "bug", "red", "Indicates a bug in the project")
+	if err != nil {
+		testsuit.T.Fail(fmt.Errorf("failed to add label to project: %w", err))
+	}
+
 	return project
 }
+
+// // addLabelToMergeRequest adds a label to a GitLab Merge Request
+// func addLabelToMergeRequest(client *gitlab.Client, projectID int, mergeRequestIID int, label string) error {
+// 	opts := &gitlab.UpdateMergeRequestOptions{
+// 		Labels: gitlab.Labels{label},
+// 	}
+
+// 	_, _, err := client.MergeRequests.UpdateMergeRequest(projectID, mergeRequestIID, opts)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to add label to Merge Request: %w", err)
+// 	}
+
+// 	fmt.Printf("Successfully added label '%s' to Merge Request #%d\n", label, mergeRequestIID)
+// 	return nil
+// }
 
 // Create new branch to push the commit
 func createBranch(client *gitlab.Client, projectID int, branchName string) error {
@@ -321,6 +371,39 @@ func generatePipelineRun() error {
 	return nil
 }
 
+// addAnnotationToYAML adds the specified annotation to the PipelineRun YAML
+func addAnnotationToYAML(yamlContent []byte, key, value string) ([]byte, error) {
+	var pipelineRun map[string]interface{}
+
+	if err := yaml.Unmarshal(yamlContent, &pipelineRun); err != nil {
+		return nil, fmt.Errorf("failed to parse YAML: %w", err)
+	}
+
+	// Ensure metadata and annotations exist
+	metadata, ok := pipelineRun["metadata"].(map[string]interface{})
+	if !ok {
+		metadata = make(map[string]interface{})
+		pipelineRun["metadata"] = metadata
+	}
+
+	annotations, ok := metadata["annotations"].(map[string]interface{})
+	if !ok {
+		annotations = make(map[string]interface{})
+		metadata["annotations"] = annotations
+	}
+
+	// Add or update the annotation
+	annotations[key] = value
+
+	// Convert back to YAML
+	modifiedYAML, err := yaml.Marshal(pipelineRun)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize modified YAML: %w", err)
+	}
+
+	return modifiedYAML, nil
+}
+
 // Validate generated yaml file from pac generate cmd
 func validateYAML(yamlContent []byte) error {
 	var content map[string]interface{}
@@ -343,7 +426,13 @@ func createCommit(client *gitlab.Client, projectID int, branch, commitMessage, f
 		return fmt.Errorf("could not read file %s: %v", filePath, err)
 	}
 
-	if err := validateYAML(fileContent); err != nil {
+	// Modify YAML to add annotation
+	modifiedYAML, err := addAnnotationToYAML(fileContent, "pipelinesascode.tekton.dev/on-label", "bug")
+	if err != nil {
+		return fmt.Errorf("could not add annotation: %v", err)
+	}
+
+	if err := validateYAML(modifiedYAML); err != nil {
 		return fmt.Errorf("invalid YAML content: %v", err)
 	}
 
@@ -353,7 +442,7 @@ func createCommit(client *gitlab.Client, projectID int, branch, commitMessage, f
 		Branch:        &branch,
 		CommitMessage: &commitMessage,
 		Actions: []*gitlab.CommitActionOptions{
-			{Action: &action, FilePath: gitlab.Ptr(fileDesPath), Content: gitlab.Ptr(string(fileContent))},
+			{Action: &action, FilePath: gitlab.Ptr(fileDesPath), Content: gitlab.Ptr(string(modifiedYAML))},
 		},
 	}
 
@@ -477,15 +566,15 @@ func deleteGitlabProject(client *gitlab.Client, projectID int) error {
 	return nil
 }
 
-func CleanupPAC(client *gitlab.Client, c *clients.Clients, projectID int, smeeDeploymentName, namespace string) {
-	// Remove Forked Project
-	if cleanupErr := deleteGitlabProject(client, projectID); cleanupErr != nil {
-		testsuit.T.Fail(fmt.Errorf("cleanup failed: %v", cleanupErr))
-	}
+// func CleanupPAC(client *gitlab.Client, c *clients.Clients, projectID int, smeeDeploymentName, namespace string) {
+// 	// Remove Forked Project
+// 	if cleanupErr := deleteGitlabProject(client, projectID); cleanupErr != nil {
+// 		testsuit.T.Fail(fmt.Errorf("cleanup failed: %v", cleanupErr))
+// 	}
 
-	// Delete Smee Deployment
-	err := k8s.DeleteDeployment(c, namespace, smeeDeploymentName)
-	if err != nil {
-		testsuit.T.Fail(fmt.Errorf("failed to Delete Smee Deployment: %v", err))
-	}
-}
+// 	// Delete Smee Deployment
+// 	err := k8s.DeleteDeployment(c, namespace, smeeDeploymentName)
+// 	if err != nil {
+// 		testsuit.T.Fail(fmt.Errorf("failed to Delete Smee Deployment: %v", err))
+// 	}
+// }
