@@ -24,12 +24,6 @@ Steps:
   * Configure GitHub token for git resolver in TektonConfig
   * Configure the bundles resolver
   * Enable console plugin
-  * Apply in namespace "openshift-pipelines"
-    | S.NO | resource_dir                   |
-    |------|--------------------------------|
-    | 1    | testdata/pvc/tekton-logs.yaml  |
-    | 2    | testdata/results/result.yaml   | 
-  * Create Results route
   * Validate pipelines deployment
   * Validate triggers deployment
   * Validate PAC deployment
@@ -37,6 +31,12 @@ Steps:
   * Validate hub deployment
   * Validate tkn server cli deployment
   * Validate console plugin deployment
+  * Apply in namespace "openshift-pipelines"
+    | S.NO | resource_dir                   |
+    |------|--------------------------------|
+    | 1    | testdata/pvc/tekton-logs.yaml  |
+    | 2    | testdata/results/result.yaml   | 
+  * Create Results route
   * Ensure that Tekton Results is ready
   * Verify TektonAddons Install status
   * Validate RBAC
