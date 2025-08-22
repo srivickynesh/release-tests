@@ -19,7 +19,7 @@ Steps:
   * Check version of OSP
  
 ## Check client versions: PIPELINES-22-TC02
-Tags: sanity
+Tags: sanity, e2e
 Component: Operator
 Level: Integration
 Type: Functional
