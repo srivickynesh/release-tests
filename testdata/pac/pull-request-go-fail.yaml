@@ -1,0 +1,32 @@
+---
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  annotations:
+    pipelinesascode.tekton.dev/on-target-branch: "[main]"
+    pipelinesascode.tekton.dev/on-event: "[pull_request]"
+  name: go
+spec:
+  pipelineSpec:
+    tasks:
+      - name: error-me
+        taskSpec:
+          steps:
+            - name: eror-me-robot
+              image: registry.access.redhat.com/ubi8/ubi-micro:8.4
+              script: | 
+               cat <<EOF
+                === RUN   TestCreateBasicAuthSecret/different_git_user
+                basic_auth_test.go:101: assertion failed: https://superman:supersecrete@forge/bat/man (secret.StringData[".git-credentials"] string) != https://superman:supersecrete@forge/super/man (tt.expectedGitCredentials string)
+                --- FAIL: TestCreateBasicAuthSecret (0.00s)
+                    --- PASS: TestCreateBasicAuthSecret/Target_secret_not_there (0.00s)
+                    --- PASS: TestCreateBasicAuthSecret/Use_clone_URL (0.00s)
+                    --- PASS: TestCreateBasicAuthSecret/Target_secret_already_there (0.00s)
+                    --- PASS: TestCreateBasicAuthSecret/Lowercase_secrets (0.00s)
+                    --- PASS: TestCreateBasicAuthSecret/Use_clone_URL#01 (0.00s)
+                    --- FAIL: TestCreateBasicAuthSecret/different_git_user (0.00s)
+                FAIL
+                FAIL	github.com/openshift-pipelines/pipelines-as-code/pkg/secrets	0.030s
+                FAIL
+               EOF
+               exit 1

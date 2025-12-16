@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math/big"
@@ -22,6 +23,7 @@ import (
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/git"
 	"github.com/openshift-pipelines/pipelines-as-code/pkg/params/info"
 	"github.com/openshift-pipelines/release-tests/pkg/clients"
+	rtcmd "github.com/openshift-pipelines/release-tests/pkg/cmd"
 	"github.com/openshift-pipelines/release-tests/pkg/config"
 	"github.com/openshift-pipelines/release-tests/pkg/k8s"
 	"github.com/openshift-pipelines/release-tests/pkg/oc"
@@ -33,6 +35,7 @@ import (
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 const (
@@ -231,7 +234,108 @@ func createNewRepository(c *clients.Clients, projectName, targetGroupNamespace, 
 	}
 
 	log.Printf("Repository %q created successfully in namespace %q", repo.GetName(), repo.GetNamespace())
+	// Store the Repository name so we can later patch it with AI settings.
+	store.PutScenarioData("pacRepositoryName", repo.GetName())
 	return nil
+}
+
+// ConfigureRepositoryAISettings patches the Pipelines-as-Code Repository resource
+// to enable AI/LLM analysis using a configuration similar to the example in the
+// release notes.
+func ConfigureRepositoryAISettings() {
+	repoName := store.GetScenarioData("pacRepositoryName")
+	if repoName == "" {
+		log.Printf("pacRepositoryName not set; skipping AI settings configuration on Repository")
+		return
+	}
+
+	namespace := store.Namespace()
+	c := store.Clients()
+
+	// Ensure the Gemini API key secret exists in the same namespace as the
+	// Repository resource, per docs:
+	// https://pipelinesascode.com/docs/guide/llm-analysis/#aillm-powered-pipeline-analysis
+	geminiToken := os.Getenv("GEMINI_API_KEY")
+	if geminiToken == "" {
+		testsuit.T.Fail(fmt.Errorf("GEMINI_API_KEY environment variable not set; cannot configure AI analysis"))
+		return
+	}
+	if !oc.SecretExists("gemini-api-key", namespace) {
+		log.Printf("Creating Gemini API key secret 'gemini-api-key' in namespace %q", namespace)
+		rtcmd.MustSucceed("oc", "create", "secret", "generic", "gemini-api-key", "--from-literal", "token="+geminiToken, "-n", namespace)
+	} else {
+		log.Printf("Gemini API key secret 'gemini-api-key' already exists in namespace %q", namespace)
+	}
+
+	// Timestamp checkpoint for validating that the AI comment is created/updated
+	// after we configured the feature.
+	store.PutScenarioData("aiCommentSince", time.Now().UTC().Format(time.RFC3339Nano))
+
+	model := os.Getenv("PAC_AI_MODEL") // Optional override. If empty, use provider default.
+
+	role := map[string]any{
+		"name": "gemini-failure-analysis",
+		"prompt": `Analyze this failed pipeline run from a Google Gemini perspective:
+
+					1. Root cause
+
+					2. Fix steps
+
+					3. Preventive measures
+
+					Start your response with the exact marker: PAC_AI_GEMINI_FAILURE_ANALYSIS`,
+		"on_cel": `body.pipelineRun.status.conditions[0].reason == "Failed"`,
+		"context_items": map[string]any{
+			"error_content": true,
+			"container_logs": map[string]any{
+				"enabled":   true,
+				"max_lines": 100,
+			},
+		},
+		"output": "pr-comment",
+	}
+	// If model is not provided, the framework uses the provider default
+	// (for Gemini: gemini-2.5-flash-lite).
+	if model != "" {
+		role["model"] = model
+	}
+
+	patchObj := map[string]any{
+		"spec": map[string]any{
+			"settings": map[string]any{
+				"ai": map[string]any{
+					"enabled":         true,
+					"provider":        "gemini",
+					"timeout_seconds": 30,
+					"max_tokens":      1000,
+					"secret_ref": map[string]any{
+						"name": "gemini-api-key",
+						"key":  "token",
+					},
+					"roles": []any{role},
+				},
+			},
+		},
+	}
+
+	patchBytes, err := json.Marshal(patchObj)
+	if err != nil {
+		testsuit.T.Fail(fmt.Errorf("failed to marshal AI settings patch for Repository %q: %v", repoName, err))
+		return
+	}
+
+	if _, err := c.PacClientset.Repositories(namespace).Patch(
+		context.Background(),
+		repoName,
+		types.MergePatchType,
+		patchBytes,
+		metav1.PatchOptions{},
+	); err != nil {
+		testsuit.T.Fail(fmt.Errorf("failed to patch Repository %q with AI settings: %v", repoName, err))
+		return
+	}
+
+	log.Printf("Configured AI analysis settings on Repository %q in namespace %q", repoName, namespace)
 }
 
 // addLabelToProject adds a label to a GitLab project
@@ -818,4 +922,73 @@ func CleanupPAC(c *clients.Clients, smeeDeploymentName, namespace string) {
 	if err = k8s.DeleteDeployment(c, namespace, smeeDeploymentName); err != nil {
 		testsuit.T.Fail(fmt.Errorf("failed to Delete Smee Deployment: %v", err))
 	}
+}
+
+func MakePullRequestPipelineFail() {
+	data, err := os.ReadFile(config.Path("testdata", "pac", "pull-request-go-fail.yaml"))
+	if err != nil {
+		testsuit.T.Fail(fmt.Errorf("failed to read testdata failing pull_request PipelineRun: %v", err))
+	}
+
+	if err := validateYAML(data); err != nil {
+		testsuit.T.Fail(fmt.Errorf("invalid YAML in testdata failing pull_request PipelineRun: %v", err))
+	}
+
+	if err := os.WriteFile(pullRequestFileName, data, 0600); err != nil {
+		testsuit.T.Fail(fmt.Errorf("failed to write %s: %v", pullRequestFileName, err))
+	}
+	log.Printf("Wrote failing pull-request.yaml from testdata to %s", pullRequestFileName)
+}
+
+// Validates AI analysis comment in MR
+func ValidateAIMRComment() {
+	projectID, err := strconv.Atoi(store.GetScenarioData("projectID"))
+	if err != nil {
+		testsuit.T.Fail(fmt.Errorf("failed to convert project ID to integer: %v", err))
+	}
+	mrID, err := strconv.Atoi(store.GetScenarioData("mrID"))
+	if err != nil {
+		testsuit.T.Fail(fmt.Errorf("failed to convert MR ID to integer: %v", err))
+	}
+
+	sinceStr := store.GetScenarioData("aiCommentSince")
+	sinceTime, err := time.Parse(time.RFC3339Nano, sinceStr)
+	if err != nil {
+		testsuit.T.Fail(fmt.Errorf("invalid aiCommentSince timestamp %q: %v", sinceStr, err))
+	}
+
+	const marker = "pac_ai_gemini_failure_analysis"
+	const maxAttempts = 30
+	const delay = 10 * time.Second
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		notes, _, err := client.Notes.ListMergeRequestNotes(projectID, mrID, &gitlab.ListMergeRequestNotesOptions{})
+		if err != nil {
+			testsuit.T.Fail(fmt.Errorf("failed to list MR notes for MR %d in project %d: %v", mrID, projectID, err))
+		}
+		for _, n := range notes {
+			if !strings.Contains(strings.ToLower(n.Body), marker) {
+				continue
+			}
+			updated := n.UpdatedAt
+			created := n.CreatedAt
+			after := false
+			if updated != nil && updated.After(sinceTime) {
+				after = true
+			} else if created != nil && created.After(sinceTime) {
+				after = true
+			}
+			if !after {
+				continue
+			}
+
+			log.Printf("Found AI analysis comment on MR %d:\n", mrID)
+			return
+		}
+
+		log.Printf("AI analysis comment not found yet on MR %d (attempt %d/%d); sleeping %s...", mrID, attempt, maxAttempts, delay)
+		time.Sleep(delay)
+	}
+
+	testsuit.T.Fail(fmt.Errorf("AI analysis comment not found on MR %d after %d attempts", mrID, maxAttempts))
 }

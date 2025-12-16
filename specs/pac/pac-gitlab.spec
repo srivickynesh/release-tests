@@ -62,3 +62,24 @@ Steps:
   * "2" pipelinerun(s) should be present within "10" seconds
   * Validate "pull_request" PipelineRun for "success"
   * Cleanup PAC
+
+## Configure PAC AI analysis in GitLab Project: PIPELINES-30-TC04
+Tags: pac, e2e, ai-analysis
+Component: PAC
+Level: Integration
+Type: Functional
+Importance: High
+
+This scenario tests AI-powered failure analysis on a failed pull_request PipelineRun in GitLab.
+
+Steps:
+  * Validate PAC Info Install
+  * Setup Gitlab Client
+  * Create Smee deployment
+  * Configure AI analysis for PAC Repository
+  * Configure GitLab repo for "pull_request" in "main"
+  * Make pull_request PipelineRun fail
+  * Configure PipelineRun
+  * Validate "pull_request" PipelineRun for "fail"
+  * Validate AI summary comment is added in MR
+  * Cleanup PAC
