@@ -34,11 +34,6 @@ var _ = gauge.Step("Trigger push event on main branch", func() {
 	pac.TriggerPushOnForkMain()
 })
 
-var _ = gauge.Step("Validate PipelineRun for <state>", func(state string) {
-	pipelineName := pac.GetPipelineNameFromMR()
-	pipelines.ValidatePipelineRun(store.Clients(), pipelineName, state, store.Namespace())
-})
-
 var _ = gauge.Step("Validate <event_type> PipelineRun for <state>", func(event_type, state string) {
 	switch event_type {
 	case "pull_request":
@@ -58,6 +53,18 @@ var _ = gauge.Step("Validate PAC Info Install", func() {
 
 var _ = gauge.Step("Update Annotation <annotationKey> with <annotationValue>", func(annotationKey, annotationValue string) {
 	pac.UpdateAnnotation(annotationKey, annotationValue)
+})
+
+var _ = gauge.Step("Configure AI analysis for PAC Repository", func() {
+	pac.ConfigureRepositoryAISettings()
+})
+
+var _ = gauge.Step("Make pull_request PipelineRun fail", func() {
+	pac.MakePullRequestPipelineFail()
+})
+
+var _ = gauge.Step("Validate AI summary comment is added in MR", func() {
+	pac.ValidateAIMRComment()
 })
 
 var _ = gauge.Step("Add Comment <comment> in MR", func(comment string) {
