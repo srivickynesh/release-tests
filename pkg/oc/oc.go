@@ -36,9 +36,56 @@ func Delete(path_dir, namespace string) {
 	log.Printf("output: %s\n", cmd.MustSuccedIncreasedTimeout(time.Second*300, "oc", "delete", "-f", config.Path(path_dir), "-n", namespace).Stdout())
 }
 
-// CreateNewProject Helps you to create new project
+// CreateNewProject creates a new project on the local cluster, and also
+// mirrors the project + a Kueue LocalQueue on hub and spoke clusters when
+// HUB_KUBECONFIG / SPOKE_KUBECONFIG environment variables are set.
 func CreateNewProject(ns string) {
 	log.Printf("output: %s\n", cmd.MustSucceed("oc", "new-project", ns).Stdout())
+	setupRemoteClusters(ns)
+}
+
+func setupRemoteClusters(ns string) {
+	for _, kc := range []struct {
+		name       string
+		kubeconfig string
+	}{
+		{"hub", config.HubKubeconfig},
+		{"spoke", config.SpokeKubeconfig},
+	} {
+		if kc.kubeconfig == "" {
+			continue
+		}
+		log.Printf("Setting up project %q on %s cluster", ns, kc.name)
+		createProjectOnRemoteCluster(ns, kc.kubeconfig, kc.name)
+		createLocalQueueOnRemoteCluster(ns, kc.kubeconfig, kc.name)
+	}
+}
+
+func createProjectOnRemoteCluster(ns, kubeconfig, clusterName string) {
+	result := cmd.Run("oc", "new-project", ns, "--kubeconfig", kubeconfig)
+	if result.ExitCode != 0 {
+		log.Printf("Warning: failed to create project %q on %s cluster: %s", ns, clusterName, result.Stderr())
+		return
+	}
+	log.Printf("Created project %q on %s cluster", ns, clusterName)
+}
+
+func createLocalQueueOnRemoteCluster(ns, kubeconfig, clusterName string) {
+	localQueueYAML := fmt.Sprintf(`apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata:
+  name: pipelines-queue
+  namespace: %s
+spec:
+  clusterQueue: cluster-queue`, ns)
+
+	result := cmd.Run("bash", "-c",
+		fmt.Sprintf("echo '%s' | oc apply --kubeconfig %s -f -", localQueueYAML, kubeconfig))
+	if result.ExitCode != 0 {
+		log.Printf("Warning: failed to create LocalQueue in %q on %s cluster: %s", ns, clusterName, result.Stderr())
+		return
+	}
+	log.Printf("Created LocalQueue 'pipelines-queue' in %q on %s cluster", ns, clusterName)
 }
 
 // DeleteProject Helps you to delete new project
@@ -48,6 +95,26 @@ func DeleteProject(ns string) {
 
 func DeleteProjectIgnoreErors(ns string) {
 	log.Printf("output: %s\n", cmd.Run("oc", "delete", "project", ns).Stdout())
+	cleanupRemoteClusters(ns)
+}
+
+func cleanupRemoteClusters(ns string) {
+	for _, kc := range []struct {
+		name       string
+		kubeconfig string
+	}{
+		{"hub", config.HubKubeconfig},
+		{"spoke", config.SpokeKubeconfig},
+	} {
+		if kc.kubeconfig == "" {
+			continue
+		}
+		log.Printf("Deleting project %q on %s cluster", ns, kc.name)
+		result := cmd.Run("oc", "delete", "project", ns, "--kubeconfig", kc.kubeconfig)
+		if result.ExitCode != 0 {
+			log.Printf("Warning: failed to delete project %q on %s cluster: %s", ns, kc.name, result.Stderr())
+		}
+	}
 }
 
 func LinkSecretToSA(secretname, sa, namespace string) {

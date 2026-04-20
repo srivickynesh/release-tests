@@ -116,6 +116,11 @@ var TektonInstallersetNamePrefixes [34]string = [34]string{
 
 var PrefixesOfDefaultPipelines [9]string = [9]string{"buildah", "s2i-dotnet", "s2i-go", "s2i-java", "s2i-nodejs", "s2i-perl", "s2i-php", "s2i-python", "s2i-ruby"}
 
+var (
+	HubKubeconfig   = os.Getenv("HUB_KUBECONFIG")
+	SpokeKubeconfig = os.Getenv("SPOKE_KUBECONFIG")
+)
+
 // Flags holds the command line flags or defaults for settings in the user's environment.
 // See EnvironmentFlags for a list of supported fields
 // Todo: change initialization of falgs when required by parsing them or from environment variable
