@@ -429,7 +429,44 @@ func generatePipelineRun(eventType, branch, fileName string) error {
 	if err := pacgenerate.Generate(opts, true); err != nil {
 		return fmt.Errorf("failed to generate PipelineRun: %v", err)
 	}
-	return nil
+	return shortenPipelineRunName(fileName, eventType)
+}
+
+// shortenPipelineRunName replaces the long auto-generated PipelineRun name
+// (e.g. "release-tests-fork-12345678-pull-request") with a compact name
+// like "pac-pull-request". Only the top-level metadata.name is replaced.
+func shortenPipelineRunName(fileName, eventType string) error {
+	data, err := os.ReadFile(filepath.Clean(fileName))
+	if err != nil {
+		return fmt.Errorf("failed to read generated file: %v", err)
+	}
+
+	shortName := "pac-" + strings.ReplaceAll(eventType, "_", "-")
+
+	var content map[string]any
+	if err := yaml.Unmarshal(data, &content); err != nil {
+		return fmt.Errorf("failed to parse generated YAML: %v", err)
+	}
+
+	if meta, ok := content["metadata"].(map[any]any); ok {
+		meta["name"] = shortName
+	}
+
+	if spec, ok := content["spec"].(map[any]any); ok {
+		taskRunTemplate, ok := spec["taskRunTemplate"].(map[any]any)
+		if !ok {
+			taskRunTemplate = map[any]any{}
+			spec["taskRunTemplate"] = taskRunTemplate
+		}
+		taskRunTemplate["serviceAccountName"] = "pipeline"
+	}
+
+	out, err := yaml.Marshal(content)
+	if err != nil {
+		return fmt.Errorf("failed to marshal YAML: %v", err)
+	}
+
+	return os.WriteFile(fileName, out, 0o600)
 }
 
 // Validate generated yaml file from pac generate cmd
